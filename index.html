@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="ja" class="h-full bg-slate-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>スマートPOSレジ - スマホ対応売上管理</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .tab-active { @apply border-indigo-600 text-indigo-600 font-semibold; }
+    </style>
+</head>
+<body class="h-full flex flex-col text-slate-800">
+
+    <!-- トースト通知 -->
+    <div id="toast" class="fixed top-4 right-4 z-50 transform transition-all duration-300 translate-y-[-100px] opacity-0 max-w-sm w-full bg-white rounded-xl shadow-lg border border-slate-100 p-4 flex items-center space-x-3 pointer-events-none">
+        <div id="toast-icon" class="p-2 rounded-full"></div>
+        <div id="toast-message" class="text-sm font-medium text-slate-700"></div>
+    </div>
+
+    <!-- モーダルダイアログ (編集/削除確認) -->
+    <div id="modal-backdrop" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-40 hidden flex items-center justify-center p-4">
+        <!-- 編集モーダル -->
+        <div id="edit-modal" class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl hidden">
+            <h3 class="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <i data-lucide="edit" class="w-5 h-5 text-indigo-600"></i> 売上データの編集
+            </h3>
+            <form id="edit-form" class="space-y-4">
+                <input type="hidden" id="edit-id">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">商品名 <span class="text-rose-500">*</span></label>
+                    <input type="text" id="edit-name" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <p id="edit-name-error" class="text-xs text-rose-500 mt-1 hidden"></p>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">単価 (円) <span class="text-rose-500">*</span></label>
+                        <input type="number" id="edit-price" min="0" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <p id="edit-price-error" class="text-xs text-rose-500 mt-1 hidden"></p>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">数量 <span class="text-rose-500">*</span></label>
+                        <input type="number" id="edit-quantity" min="1" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <p id="edit-quantity-error" class="text-xs text-rose-500 mt-1 hidden"></p>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">日付 <span class="text-rose-500">*</span></label>
+                    <input type="date" id="edit-date" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <p id="edit-date-error" class="text-xs text-rose-500 mt-1 hidden"></p>
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 transition">キャンセル</button>
+                    <button type="submit" class="px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 transition">保存する</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- 削除確認モーダル -->
+        <div id="delete-modal" class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl hidden">
+            <div class="text-center">
+                <div class="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-4">
+                    <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+                </div>
+                <h3 class="text-lg font-bold text-slate-800 mb-1">データを削除しますか？</h3>
+                <p class="text-sm text-slate-500 mb-6">この操作は取り消せません。</p>
+                <div class="flex justify-center gap-3">
+                    <button type="button" onclick="closeModal()" class="w-full py-2.5 rounded-lg text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 transition">キャンセル</button>
+                    <button type="button" id="confirm-delete-btn" class="w-full py-2.5 rounded-lg text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 transition">削除する</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ログイン画面 -->
+    <div id="login-screen" class="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-indigo-500 to-purple-600">
+        <div class="max-w-md w-full bg-white/95 backdrop-blur rounded-3xl p-8 shadow-2xl text-center border border-white/20">
+            <div class="w-16 h-16 bg-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-6 text-indigo-600 shadow-inner">
+                <i data-lucide="shopping-bag" class="w-8 h-8"></i>
+            </div>
+            <h1 class="text-2xl font-bold text-slate-800 mb-2">スマートPOSレジ</h1>
+            <p class="text-slate-500 text-sm mb-8">個人の売上記録・分析をシンプルかつスマートに。個別のデータは安全に保護されます。</p>
+            <button id="google-login-btn" class="w-full py-3.5 px-4 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl text-slate-700 font-semibold shadow-sm flex items-center justify-center gap-3 transition transform active:scale-95">
+                <svg class="w-5 h-5" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                </svg>
+                Google アカウントでログイン
+            </button>
+        </div>
+    </div>
+
+    <!-- メインアプリケーション画面 -->
+    <div id="app-screen" class="hidden flex-col h-full bg-slate-50">
+        <!-- ナビゲーションバー -->
+        <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+            <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <div class="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-bold shadow-sm">
+                        <i data-lucide="receipt" class="w-5 h-5"></i>
+                    </div>
+                    <span class="font-bold text-slate-800 text-lg">SmartPOS</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-2">
+                        <img id="user-photo" class="w-8 h-8 rounded-full border border-slate-200 hidden" alt="User">
+                        <span id="user-name" class="text-xs font-semibold text-slate-600 hidden sm:inline"></span>
+                    </div>
+                    <button id="logout-btn" class="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition" title="ログアウト">
+                        <i data-lucide="log-out" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            </div>
+            <!-- サマリーカード -->
+            <div class="bg-indigo-50/50 border-t border-indigo-100/50">
+                <div class="max-w-4xl mx-auto px-4 py-3 grid grid-cols-2 gap-4">
+                    <div class="bg-white p-3 rounded-xl border border-indigo-100 shadow-sm">
+                        <span class="text-xs text-slate-500 font-medium">累計売上高</span>
+                        <div class="text-lg font-bold text-indigo-600" id="stat-total-sales">¥0</div>
+                    </div>
+                    <div class="bg-white p-3 rounded-xl border border-indigo-100 shadow-sm">
+                        <span class="text-xs text-slate-500 font-medium">総販売点数</span>
+                        <div class="text-lg font-bold text-slate-800" id="stat-total-items">0 点</div>
+                    </div>
+                </div>
+            </div>
+            <!-- タブナビゲーション -->
+            <div class="max-w-4xl mx-auto px-4 flex border-t border-slate-100">
+                <button onclick="switchTab('register')" id="tab-register" class="flex-1 py-3 text-center text-xs font-medium text-slate-500 border-b-2 border-transparent transition flex items-center justify-center gap-1 tab-active">
+                    <i data-lucide="plus-circle" class="w-4 h-4"></i> 売上登録
+                </button>
+                <button onclick="switchTab('history')" id="tab-history" class="flex-1 py-3 text-center text-xs font-medium text-slate-500 border-b-2 border-transparent transition flex items-center justify-center gap-1">
+                    <i data-lucide="list" class="w-4 h-4"></i> 履歴・検索
+                </button>
+                <button onclick="switchTab('analytics')" id="tab-analytics" class="flex-1 py-3 text-center text-xs font-medium text-slate-500 border-b-2 border-transparent transition flex items-center justify-center gap-1">
+                    <i data-lucide="bar-chart-3" class="w-4 h-4"></i> 日別集計・グラフ
+                </button>
+            </div>
+        </header>
+
+        <!-- メインコンテンツ領域 -->
+        <main class="flex-1 max-w-4xl w-full mx-auto p-4 overflow-y-auto">
+            
+            <!-- 1. 売上登録セクション -->
+            <section id="section-register" class="space-y-4">
+                <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+                    <h2 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                        <i data-lucide="shopping-cart" class="w-5 h-5 text-indigo-600"></i> 商品の売上を記録
+                    </h2>
+                    <form id="add-sale-form" class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-600 mb-1">商品名 <span class="text-rose-500">*</span></label>
+                            <input type="text" id="add-name" placeholder="例: コーヒー, Tシャツ" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none transition">
+                            <p id="add-name-error" class="text-xs text-rose-500 mt-1 hidden"></p>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">単価 (円) <span class="text-rose-500">*</span></label>
+                                <input type="number" id="add-price" placeholder="500" min="0" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none transition">
+                                <p id="add-price-error" class="text-xs text-rose-500 mt-1 hidden"></p>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">数量 <span class="text-rose-500">*</span></label>
+                                <input type="number" id="add-quantity" value="1" min="1" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none transition">
+                                <p id="add-quantity-error" class="text-xs text-rose-500 mt-1 hidden"></p>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-600 mb-1">販売日 <span class="text-rose-500">*</span></label>
+                            <input type="date" id="add-date" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none transition">
+                            <p id="add-date-error" class="text-xs text-rose-500 mt-1 hidden"></p>
+                        </div>
+                        <button type="submit" class="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-md transition transform active:scale-[0.99] flex items-center justify-center gap-2">
+                            <i data-lucide="plus" class="w-5 h-5"></i> 売上を登録する
+                        </button>
+                    </form>
+                </div>
+            </section>
+
+            <!-- 2. 売上履歴 & 検索セクション -->
+            <section id="section-history" class="space-y-4 hidden">
+                <div class="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm space-y-3">
+                    <div class="relative">
+                        <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3.5"></i>
+                        <input type="text" id="search-input" placeholder="商品名で絞り込み..." oninput="renderSalesList()" class="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none transition">
+                    </div>
+                </div>
+
+                <div id="sales-list" class="space-y-2.5">
+                    <!-- 売上カード一覧がここに動的に追加されます -->
+                </div>
+            </section>
+
+            <!-- 3. 集計 & グラフセクション -->
+            <section id="section-analytics" class="space-y-4 hidden">
+                <!-- グラフカード -->
+                <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+                        <i data-lucide="line-chart" class="w-4 h-4 text-indigo-600"></i> 日別売上推移
+                    </h3>
+                    <div class="h-64 relative">
+                        <canvas id="salesChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- 日付別合計テーブル -->
+                <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+                    <h3 class="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
+                        <i data-lucide="calendar" class="w-4 h-4 text-indigo-600"></i> 日付ごとの売上合計
+                    </h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b border-slate-100 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                                    <th class="pb-2">日付</th>
+                                    <th class="pb-2 text-right">販売件数</th>
+                                    <th class="pb-2 text-right">合計金額</th>
+                                </tr>
+                            </thead>
+                            <tbody id="daily-summary-tbody" class="divide-y divide-slate-50 text-sm">
+                                <!-- 日別データが動的に追加されます -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { 
+            getAuth, 
+            signInWithPopup, 
+            GoogleAuthProvider, 
+            signOut, 
+            onAuthStateChanged 
+        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { 
+            getFirestore, 
+            collection, 
+            addDoc, 
+            updateDoc, 
+            deleteDoc, 
+            doc, 
+            onSnapshot, 
+            query, 
+            orderBy, 
+            serverTimestamp 
+        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // 指定されたFirebase設定
+        const firebaseConfig = {
+            apiKey: "AIzaSyCWrd8hPUT71ZgA3UuEafKHkrG9SGoeMX8",
+            authDomain: "test-3ccc4.firebaseapp.com",
+            projectId: "test-3ccc4",
+            storageBucket: "test-3ccc4.firebasestorage.app",
+            messagingSenderId: "458084418777",
+            appId: "1:458084418777:web:af89ba6ef0d53ad0adeac8"
+        };
+
+        // Firebase初期化
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const provider = new GoogleAuthProvider();
+
+        // 状態変数
+        let currentUser = null;
+        let salesData = [];
+        let unsubscribeFirestore = null;
+        let chartInstance = null;
+        let pendingDeleteId = null;
+
+        // 今日の日付をYYYY-MM-DD形式で取得
+        const getTodayString = () => new Date().toISOString().split('T')[0];
+
+        // 画面切り替えとタブ更新
+        window.switchTab = (tabName) => {
+            ['register', 'history', 'analytics'].forEach(tab => {
+                const sec = document.getElementById(`section-${tab}`);
+                const btn = document.getElementById(`tab-${tab}`);
+                if (tab === tabName) {
+                    sec.classList.remove('hidden');
+                    btn.classList.add('tab-active');
+                } else {
+                    sec.classList.add('hidden');
+                    btn.classList.remove('tab-active');
+                }
+            });
+            if (tabName === 'analytics') {
+                renderAnalytics();
+            }
+        };
+
+        // トースト表示機能
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            const icon = document.getElementById('toast-icon');
+            const msg = document.getElementById('toast-message');
+
+            msg.textContent = message;
+            if (type === 'success') {
+                icon.className = 'p-1.5 rounded-full bg-emerald-100 text-emerald-600';
+                icon.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i>';
+            } else {
+                icon.className = 'p-1.5 rounded-full bg-rose-100 text-rose-600';
+                icon.innerHTML = '<i data-lucide="alert-circle" class="w-4 h-4"></i>';
+            }
+            lucide.createIcons();
+
+            toast.classList.remove('translate-y-[-100px]', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-[-100px]', 'opacity-0');
+            }, 3000);
+        }
+
+        // Googleログイン
+        document.getElementById('google-login-btn').addEventListener('click', async () => {
+            try {
+                await signInWithPopup(auth, provider);
+            } catch (err) {
+                console.error("ログインエラー:", err);
+                showToast("ログインに失敗しました。", "error");
+            }
+        });
+
+        // ログアウト
+        document.getElementById('logout-btn').addEventListener('click', async () => {
+            try {
+                await signOut(auth);
+                showToast("ログアウトしました");
+            } catch (err) {
+                showToast("ログアウトエラーが発生しました", "error");
+            }
+        });
+
+        // 認証状態の監視
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            if (user) {
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('app-screen').classList.remove('hidden');
+                document.getElementById('app-screen').classList.add('flex');
+
+                // ユーザー情報表示
+                if (user.photoURL) {
+                    const img = document.getElementById('user-photo');
+                    img.src = user.photoURL;
+                    img.classList.remove('hidden');
+                }
+                document.getElementById('user-name').textContent = user.displayName || 'ユーザー';
+                document.getElementById('add-date').value = getTodayString();
+
+                // Firestoreリアルタイム同期開始
+                subscribeSalesData(user.uid);
+            } else {
+                if (unsubscribeFirestore) unsubscribeFirestore();
+                salesData = [];
+                document.getElementById('app-screen').classList.add('hidden');
+                document.getElementById('app-screen').classList.remove('flex');
+                document.getElementById('login-screen').classList.remove('hidden');
+            }
+        });
+
+        // ユーザー専用コレクションのリスナーを設定
+        function subscribeSalesData(uid) {
+            // パス: artifacts/{appId}/users/{userId}/sales
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const salesColRef = collection(db, 'artifacts', appId, 'users', uid, 'sales');
+
+            unsubscribeFirestore = onSnapshot(salesColRef, (snapshot) => {
+                salesData = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+
+                // 日付昇順ソート（表示用にメモリ内でソート）
+                salesData.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+                updateSummaryStats();
+                renderSalesList();
+                renderAnalytics();
+            }, (error) => {
+                console.error("データ取得エラー:", error);
+                showToast("データの同期に失敗しました", "error");
+            });
+        }
+
+        // 集計カードの更新
+        function updateSummaryStats() {
+            const totalSales = salesData.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
+            const totalItems = salesData.reduce((sum, item) => sum + Number(item.quantity), 0);
+
+            document.getElementById('stat-total-sales').textContent = `¥${totalSales.toLocaleString()}`;
+            document.getElementById('stat-total-items').textContent = `${totalItems.toLocaleString()} 点`;
+        }
+
+        function validateForm(nameId, priceId, quantityId, dateId, errPrefix) {
+            let isValid = true;
+
+            const name = document.getElementById(nameId).value.trim();
+            const price = document.getElementById(priceId).value;
+            const quantity = document.getElementById(quantityId).value;
+            const date = document.getElementById(dateId).value;
+
+            // リセット
+            ['name', 'price', 'quantity', 'date'].forEach(field => {
+                const el = document.getElementById(`${errPrefix}-${field}-error`);
+                if (el) el.classList.add('hidden');
+            });
+
+            if (!name) {
+                showError(`${errPrefix}-name-error`, '商品名を入力してください');
+                isValid = false;
+            }
+
+            if (!price || isNaN(price) || Number(price) < 0) {
+                showError(`${errPrefix}-price-error`, '0以上の有効な金額を入力してください');
+                isValid = false;
+            }
+
+            if (!quantity || isNaN(quantity) || Number(quantity) <= 0) {
+                showError(`${errPrefix}-quantity-error`, '1以上の数値を入力してください');
+                isValid = false;
+            }
+
+            if (!date) {
+                showError(`${errPrefix}-date-error`, '日付を選択してください');
+                isValid = false;
+            }
+
+            return isValid ? { name, price: Number(price), quantity: Number(quantity), date } : null;
+        }
+
+        function showError(elementId, msg) {
+            const el = document.getElementById(elementId);
+            if (el) {
+                el.textContent = msg;
+                el.classList.remove('hidden');
+            }
+        }
+
+        document.getElementById('add-sale-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentUser) return;
+
+            const validated = validateForm('add-name', 'add-price', 'add-quantity', 'add-date', 'add');
+            if (!validated) return;
+
+            try {
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const salesColRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'sales');
+
+                await addDoc(salesColRef, {
+                    ...validated,
+                    createdAt: serverTimestamp()
+                });
+
+                showToast("売上を登録しました！");
+                document.getElementById('add-name').value = '';
+                document.getElementById('add-price').value = '';
+                document.getElementById('add-quantity').value = '1';
+            } catch (err) {
+                console.error("登録エラー:", err);
+                showToast("保存できませんでした", "error");
+            }
+        });
+
+        window.renderSalesList = () => {
+            const container = document.getElementById('sales-list');
+            const keyword = document.getElementById('search-input').value.trim().toLowerCase();
+
+            const filtered = salesData.filter(item => item.name.toLowerCase().includes(keyword));
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-12 bg-white rounded-2xl border border-slate-200/80">
+                        <i data-lucide="inbox" class="w-10 h-10 text-slate-300 mx-auto mb-2"></i>
+                        <p class="text-sm font-medium text-slate-500">該当する売上データが見つかりません</p>
+                    </div>`;
+                lucide.createIcons();
+                return;
+            }
+
+            container.innerHTML = filtered.map(item => {
+                const subtotal = item.price * item.quantity;
+                return `
+                    <div class="bg-white rounded-xl p-4 border border-slate-200/80 shadow-sm flex items-center justify-between gap-3 transition hover:border-indigo-200">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="text-xs font-semibold px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md">${item.date}</span>
+                                <h4 class="text-sm font-bold text-slate-800 truncate">${escapeHtml(item.name)}</h4>
+                            </div>
+                            <div class="text-xs text-slate-500">
+                                単価: ¥${item.price.toLocaleString()} × ${item.quantity}点
+                            </div>
+                        </div>
+                        <div class="text-right flex flex-col items-end gap-1">
+                            <span class="text-base font-bold text-slate-800">¥${subtotal.toLocaleString()}</span>
+                            <div class="flex items-center gap-1">
+                                <button onclick="openEditModal('${item.id}')" class="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-50 transition">
+                                    <i data-lucide="pencil" class="w-4 h-4"></i>
+                                </button>
+                                <button onclick="openDeleteModal('${item.id}')" class="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-50 transition">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            lucide.createIcons();
+        };
+
+        function escapeHtml(str) {
+            return String(str).replace(/[&<>"']/g, match => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[match]));
+        }
+
+        window.openEditModal = (id) => {
+            const item = salesData.find(s => s.id === id);
+            if (!item) return;
+
+            document.getElementById('edit-id').value = item.id;
+            document.getElementById('edit-name').value = item.name;
+            document.getElementById('edit-price').value = item.price;
+            document.getElementById('edit-quantity').value = item.quantity;
+            document.getElementById('edit-date').value = item.date;
+
+            document.getElementById('modal-backdrop').classList.remove('hidden');
+            document.getElementById('edit-modal').classList.remove('hidden');
+            document.getElementById('delete-modal').classList.add('hidden');
+        };
+
+        window.openDeleteModal = (id) => {
+            pendingDeleteId = id;
+            document.getElementById('modal-backdrop').classList.remove('hidden');
+            document.getElementById('delete-modal').classList.remove('hidden');
+            document.getElementById('edit-modal').classList.add('hidden');
+        };
+
+        window.closeModal = () => {
+            document.getElementById('modal-backdrop').classList.add('hidden');
+            document.getElementById('edit-modal').classList.add('hidden');
+            document.getElementById('delete-modal').classList.add('hidden');
+            pendingDeleteId = null;
+        };
+
+        // 編集フォーム送信
+        document.getElementById('edit-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentUser) return;
+
+            const id = document.getElementById('edit-id').value;
+            const validated = validateForm('edit-name', 'edit-price', 'edit-quantity', 'edit-date', 'edit');
+            if (!validated) return;
+
+            try {
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'sales', id);
+                await updateDoc(docRef, validated);
+
+                showToast("売上データを更新しました");
+                closeModal();
+            } catch (err) {
+                console.error("更新エラー:", err);
+                showToast("更新できませんでした", "error");
+            }
+        });
+
+        // 削除処理の確定
+        document.getElementById('confirm-delete-btn').addEventListener('click', async () => {
+            if (!currentUser || !pendingDeleteId) return;
+
+            try {
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'sales', pendingDeleteId);
+                await deleteDoc(docRef);
+
+                showToast("データを削除しました");
+                closeModal();
+            } catch (err) {
+                console.error("削除エラー:", err);
+                showToast("削除に失敗しました", "error");
+            }
+        });
+
+        function renderAnalytics() {
+            // 日付別集計
+            const dailyMap = {};
+            salesData.forEach(item => {
+                const amount = item.price * item.quantity;
+                if (!dailyMap[item.date]) {
+                    dailyMap[item.date] = { count: 0, total: 0 };
+                }
+                dailyMap[item.date].count += item.quantity;
+                dailyMap[item.date].total += amount;
+            });
+
+            // ソート済みの日付リスト
+            const dates = Object.keys(dailyMap).sort();
+
+            // テーブル描画
+            const tbody = document.getElementById('daily-summary-tbody');
+            if (dates.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="3" class="text-center py-6 text-slate-400">データがありません</td></tr>`;
+            } else {
+                tbody.innerHTML = dates.slice().reverse().map(date => `
+                    <tr class="hover:bg-slate-50/50">
+                        <td class="py-2.5 font-medium text-slate-700">${date}</td>
+                        <td class="py-2.5 text-right text-slate-500">${dailyMap[date].count} 点</td>
+                        <td class="py-2.5 text-right font-bold text-slate-800">¥${dailyMap[date].total.toLocaleString()}</td>
+                    </tr>
+                `).join('');
+            }
+
+            // グラフ描画
+            const ctx = document.getElementById('salesChart').getContext('2d');
+            const totals = dates.map(d => dailyMap[d].total);
+
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [{
+                        label: '売上額 (円)',
+                        data: totals,
+                        borderColor: '#4f46e5',
+                        backgroundColor: 'rgba(79, 70, 229, 0.08)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        pointBackgroundColor: '#4f46e5',
+                        pointRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => `売上: ¥${context.raw.toLocaleString()}`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: { font: { size: 10 }, color: '#94a3b8' }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#f1f5f9' },
+                            ticks: {
+                                font: { size: 10 },
+                                color: '#94a3b8',
+                                callback: (val) => `¥${val}`
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // アイコン初期化
+        lucide.createIcons();
+    </script>
+</body>
+</html>
